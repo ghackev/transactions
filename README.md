@@ -14,9 +14,10 @@ Este proyecto implementa una API de transacciones utilizando **NestJS** y **Pris
    ```bash
    npm install
    ```
-2. Crear un archivo `.env` en la raíz (o exportar la variable en tu entorno) con la URL de la base de datos:
+2. Crear un archivo `.env` en la raíz (o exportar las variables en tu entorno) con la URL de la base de datos y la clave de Clerk:
    ```env
    DATABASE_URL="postgresql://usuario:contraseña@localhost:5432/verdemoney"
+   CLERK_SECRET_KEY="sk_test_..."
    ```
 3. Inicializar la base de datos con Prisma:
    ```bash
@@ -46,6 +47,7 @@ El servidor quedará disponible en `http://localhost:3000`.
 - **src/main.ts**: Punto de entrada de la aplicación NestJS.
 - **src/app.module.ts**: Módulo principal que agrupa los demás módulos.
 - **src/auth/clerk.guard.ts**: Guard de autenticación basado en Clerk; extrae `userId` del token.
+- **src/auth/auth.controller.ts** y **src/auth/auth.module.ts**: Endpoints para registro e inicio de sesión utilizando Clerk.
 - **src/transactions/transactions.module.ts**: Módulo que encapsula la funcionalidad de transacciones.
 - **src/transactions/transactions.controller.ts**: Controlador con las rutas REST para crear, listar y obtener el resumen de transacciones.
 - **src/transactions/transactions.service.ts**: Servicio que realiza las operaciones de base de datos mediante Prisma.
