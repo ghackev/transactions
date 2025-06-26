@@ -13,7 +13,7 @@
     "format": "prettier --write .",
     "test": "jest --passWithNoTests",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "test:ci": "npm run test -- --coverage"
+    "test:ci": "npm run test:e2e"
   },
   "dependencies": {
     "@clerk/backend": "^2.2.0",
