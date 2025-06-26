@@ -71,14 +71,16 @@ describe('Transactions Endpoints (e2e)', () => {
 
     app = moduleFixture.createNestApplication();
     // Ensure ValidationPipe matches production settings
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
     await app.init();
 
     authHeader = await createJwt();
 
-      await prisma.transaction.deleteMany({
-        where: { userId: process.env.TESTING_USER_ID },
-      });
+    await prisma.transaction.deleteMany({
+      where: { userId: process.env.TESTING_USER_ID },
+    });
   });
 
   afterAll(async () => {
@@ -172,7 +174,9 @@ describe('Transactions Endpoints (e2e)', () => {
     expect(Array.isArray(body)).toBe(true);
     expect(body.length).toBeGreaterThanOrEqual(created.length);
     created.forEach((tx) =>
-      expect(body).toEqual(expect.arrayContaining([expect.objectContaining({ id: tx.id })])),
+      expect(body).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: tx.id })]),
+      ),
     );
   });
 
@@ -203,7 +207,9 @@ describe('Transactions Endpoints (e2e)', () => {
       .set('Authorization', authHeader)
       .expect(200);
 
-    expect(body.every((tx: any) => tx.type === 'send' && tx.category === 'e2e')).toBe(true);
+    expect(
+      body.every((tx: any) => tx.type === 'send' && tx.category === 'e2e'),
+    ).toBe(true);
   });
 
   it('should return empty array for non‑existent category', async () => {
@@ -220,17 +226,21 @@ describe('Transactions Endpoints (e2e)', () => {
   /*  GET /transactions/summary                                                */
   /* ------------------------------------------------------------------------- */
 
-      it('should return total sent/received grouped by category', async () => {
+  it('should return total sent/received grouped by category', async () => {
     const { body } = await request(app.getHttpServer())
       .get('/transactions/summary')
       .set('Authorization', authHeader)
       .expect(200);
 
     // Build expected structure from the transactions we created in this test run
-    const expectedByCategory: Record<string, { sent: number; received: number }> = {};
+    const expectedByCategory: Record<
+      string,
+      { sent: number; received: number }
+    > = {};
     created.forEach((tx) => {
       expectedByCategory[tx.category] ??= { sent: 0, received: 0 };
-      if (tx.type === 'send') expectedByCategory[tx.category].sent += Number(tx.amount);
+      if (tx.type === 'send')
+        expectedByCategory[tx.category].sent += Number(tx.amount);
       else expectedByCategory[tx.category].received += Number(tx.amount);
     });
 

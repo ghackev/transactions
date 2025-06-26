@@ -31,7 +31,10 @@ export class TransactionsService {
       where: { userId },
     });
 
-    const map: Record<string, { category: string; sent: number; received: number }> = {};
+    const map: Record<
+      string,
+      { category: string; sent: number; received: number }
+    > = {};
 
     rows.forEach((r) => {
       const cat = r.category;
@@ -42,5 +45,4 @@ export class TransactionsService {
 
     return Object.values(map); // ← ej. [{ category:'e2e', sent:290, received:50 }, …]
   }
-
 }
