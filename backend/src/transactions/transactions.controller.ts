@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Query, Body, UseGuards, Req } from '@nestjs/common';
 import { TransactionsService } from './transactions.service';
-import { ClerkAuthGuard } from 'src/auth/clerk-auth.guard';
+import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { Request } from 'express';
 

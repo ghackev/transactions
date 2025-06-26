@@ -9,7 +9,7 @@
     "build": "nest build",
     "lint": "eslint \"{src,test}/**/*.ts\" --fix",
     "test": "jest --passWithNoTests",
-    "test:e2e": "jest --config ./jest-e2e.json",
+    "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:ci": "npm run test -- --coverage"
   },
   "dependencies": {
