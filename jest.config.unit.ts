@@ -3,12 +3,12 @@ import type { Config } from 'jest';
 const config: Config = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: '.',
-  testRegex: '.*\\.spec\\.ts$|.*\\.e2e-spec\\.ts$',
+  testRegex: '.*\\.spec\\.ts$',
   transform: {
     '^.+\\.(t|j)s$': 'ts-jest',
   },
   collectCoverageFrom: ['src/**/*.(t|j)s', '!src/main.ts'],
-  coverageDirectory: 'coverage/all',
+  coverageDirectory: 'coverage/unit',
   testEnvironment: 'node',
 };
 

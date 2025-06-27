@@ -11,6 +11,11 @@ import { TransactionsService } from './transactions.service';
 import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { Request } from 'express';
+import { TransactionsQueryDto } from './dto/transactions-query.dto';
+
+export interface AuthRequest extends Request {
+  user: { id: string };
+}
 
 @Controller('transactions')
 @UseGuards(ClerkAuthGuard)
@@ -24,13 +29,8 @@ export class TransactionsController {
   }
 
   @Get()
-  findAll(
-    @Req() req: Request,
-    @Query('type') type?: string,
-    @Query('category') category?: string,
-  ) {
-    const userId = (req.user as any).id as string;
-    return this.service.findAll(userId, type as any, category);
+  findAll(@Req() req: AuthRequest, @Query() query: TransactionsQueryDto) {
+    return this.service.findAll(req.user.id, query.type, query.category);
   }
 
   @Get('summary')

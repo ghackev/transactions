@@ -43,6 +43,6 @@ export class TransactionsService {
       else map[cat].received += Number(r._sum.amount);
     });
 
-    return Object.values(map); // ← ej. [{ category:'e2e', sent:290, received:50 }, …]
+    return Object.values(map); // [{ category:'cat', sent:290, received:50 }, …]
   }
 }

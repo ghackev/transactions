@@ -11,9 +11,9 @@
     "lint:fix": "eslint . --fix",
     "type-check": "tsc --noEmit",
     "format": "prettier --write .",
-    "test": "jest --passWithNoTests",
-    "test:e2e": "jest --config ./test/jest-e2e.json",
-    "test:ci": "npm run test:e2e"
+    "test": "jest --config jest.config.ts --coverage",
+    "test:unit": "jest --config jest.config.unit.ts --coverage",
+    "test:e2e": "jest --config jest.config.e2e.ts --coverage"
   },
   "dependencies": {
     "@clerk/backend": "^2.2.0",

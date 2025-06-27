@@ -1,68 +1,22 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import * as request from 'supertest';
-import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
-import { createClerkClient } from '@clerk/backend';
 import { PrismaClient } from '@prisma/client';
+import { createClerkClient } from '@clerk/backend';
 
-/**
- * Comprehensive end‑to‑end test suite for the Transactions API.
- *
- * The suite covers:
- *   • Authentication failures (missing / invalid JWT)
- *   • DTO validation errors (missing fields, negative amount, invalid enum values)
- *   • Successful CRUD‑like operations for different scenarios
- *   • Filtering combinations (type, category, combined)
- *   • Aggregation accuracy (/summary endpoint)
- *
- * Environment variables required:
- *   – CLERK_SECRET_KEY   → Backend secret for generating testing JWTs
- *   – TESTING_USER_ID    → Existing Clerk user ID to impersonate in tests
- */
-
-describe('Transactions Endpoints (e2e)', () => {
-  let app: INestApplication<App>;
+describe('Transactions E2E (independent)', () => {
+  let app: INestApplication;
+  let prisma: PrismaClient;
   let authHeader: string;
-  const prisma = new PrismaClient();
-
-  /* ------------------------------------------------------------------------- */
-  /*  Test helpers                                                             */
-  /* ------------------------------------------------------------------------- */
-
   const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const testUserId = process.env.TESTING_USER_ID!;
 
-  /** Create a short‑lived JWT for the testing user */
   const createJwt = async (): Promise<string> => {
-    const session = await clerk.sessions.createSession({
-      userId: process.env.TESTING_USER_ID!,
-    });
-
+    const session = await clerk.sessions.createSession({ userId: testUserId });
     const { jwt } = await clerk.sessions.getToken(session.id);
     return `Bearer ${jwt}`;
   };
-
-  /** Factory to produce a valid DTO with optional overrides */
-  const validTx = (
-    overrides: Partial<{
-      amount: number;
-      type: 'send' | 'receive';
-      category: string;
-      recipient: string;
-    }> = {},
-  ) => ({
-    amount: 100,
-    type: 'send' as const,
-    category: 'e2e',
-    recipient: 'test-recipient',
-    ...overrides,
-  });
-
-  const created: Array<ReturnType<typeof validTx> & { id: number }> = [];
-
-  /* ------------------------------------------------------------------------- */
-  /*  Lifecycle                                                                */
-  /* ------------------------------------------------------------------------- */
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -70,188 +24,389 @@ describe('Transactions Endpoints (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    // Ensure ValidationPipe matches production settings
     app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      }),
     );
     await app.init();
 
+    prisma = new PrismaClient();
     authHeader = await createJwt();
-
-    await prisma.transaction.deleteMany({
-      where: { userId: process.env.TESTING_USER_ID },
-    });
   });
 
   afterAll(async () => {
     await app.close();
+    await prisma.$disconnect();
   });
 
   /* ------------------------------------------------------------------------- */
   /*  AUTH                                                                     */
   /* ------------------------------------------------------------------------- */
 
-  it('should reject requests without Authorization header', () =>
-    request(app.getHttpServer()).get('/transactions').expect(401));
+  describe('AUTH', () => {
+    it('should reject requests without Authorization header', () =>
+      request(app.getHttpServer()).get('/transactions').expect(401));
 
-  it('should reject requests with an invalid token', () =>
-    request(app.getHttpServer())
-      .get('/transactions')
-      .set('Authorization', 'Bearer invalid.jwt.token')
-      .expect(401));
+    it('should reject requests with an invalid token', () =>
+      request(app.getHttpServer())
+        .get('/transactions')
+        .set('Authorization', 'Bearer invalid.token.here')
+        .expect(401));
+  });
 
   /* ------------------------------------------------------------------------- */
   /*  POST /transactions                                                       */
   /* ------------------------------------------------------------------------- */
 
-  it('should validate DTO – missing required fields', () =>
-    request(app.getHttpServer())
-      .post('/transactions')
-      .set('Authorization', authHeader)
-      .send({ amount: 50 }) // missing type, category, recipient
-      .expect(400));
+  describe('POST /transactions', () => {
+    beforeEach(async () => {
+      await prisma.transaction.deleteMany({ where: { userId: testUserId } });
+    });
 
-  it('should validate DTO – negative amount', () =>
-    request(app.getHttpServer())
-      .post('/transactions')
-      .set('Authorization', authHeader)
-      .send(validTx({ amount: -10 }))
-      .expect(400));
+    it('should reject missing required fields', () =>
+      request(app.getHttpServer())
+        .post('/transactions')
+        .set('Authorization', authHeader)
+        .send({ amount: 50 }) // Falta type, category, recipient
+        .expect(400));
 
-  it('should validate DTO – invalid type value', () =>
-    request(app.getHttpServer())
-      .post('/transactions')
-      .set('Authorization', authHeader)
-      .send(validTx({ type: 'invalid' as any }))
-      .expect(400));
+    it('should reject negative amount', () =>
+      request(app.getHttpServer())
+        .post('/transactions')
+        .set('Authorization', authHeader)
+        .send({
+          amount: -20,
+          type: 'send',
+          category: 'test',
+          recipient: 'x',
+        })
+        .expect(400));
 
-  it('should create a SEND transaction', async () => {
-    const dto = validTx();
-    const { body } = await request(app.getHttpServer())
-      .post('/transactions')
-      .set('Authorization', authHeader)
-      .send(dto)
-      .expect(201);
+    it('should reject invalid type', () =>
+      request(app.getHttpServer())
+        .post('/transactions')
+        .set('Authorization', authHeader)
+        .send({
+          amount: 50,
+          type: 'invalid',
+          category: 'test',
+          recipient: 'x',
+        })
+        .expect(400));
 
-    created.push(body);
-    expect(body).toMatchObject({ ...dto, userId: process.env.TESTING_USER_ID });
-  });
+    it('should create a SEND transaction and persist in DB', async () => {
+      const dto = {
+        amount: 150,
+        type: 'send',
+        category: 'test-category',
+        recipient: 'user1',
+      };
 
-  it('should create a RECEIVE transaction', async () => {
-    const dto = validTx({ amount: 50, type: 'receive', category: 'salary' });
-    const { body } = await request(app.getHttpServer())
-      .post('/transactions')
-      .set('Authorization', authHeader)
-      .send(dto)
-      .expect(201);
+      const { body } = await request(app.getHttpServer())
+        .post('/transactions')
+        .set('Authorization', authHeader)
+        .send(dto)
+        .expect(201);
 
-    created.push(body);
-    expect(body).toMatchObject({ ...dto, userId: process.env.TESTING_USER_ID });
-  });
+      expect(body).toMatchObject({
+        ...dto,
+        userId: testUserId,
+      });
 
-  it('should create another SEND transaction (different category)', async () => {
-    const dto = validTx({ amount: 200, category: 'groceries' });
-    const { body } = await request(app.getHttpServer())
-      .post('/transactions')
-      .set('Authorization', authHeader)
-      .send(dto)
-      .expect(201);
+      expect(body.id).toBeDefined();
 
-    created.push(body);
-    expect(body).toMatchObject({ ...dto, userId: process.env.TESTING_USER_ID });
+      const txInDb = await prisma.transaction.findUnique({
+        where: { id: body.id },
+      });
+
+      expect(txInDb).toBeTruthy();
+      expect(txInDb).toMatchObject({
+        ...dto,
+        userId: testUserId,
+      });
+
+      expect(txInDb?.createdAt).toBeInstanceOf(Date);
+      expect(txInDb?.amount).toBe(150);
+    });
+
+    it('should create a RECEIVE transaction and persist in DB', async () => {
+      const dto = {
+        amount: 200,
+        type: 'receive',
+        category: 'salary',
+        recipient: 'company-x',
+      };
+
+      const { body } = await request(app.getHttpServer())
+        .post('/transactions')
+        .set('Authorization', authHeader)
+        .send(dto)
+        .expect(201);
+
+      expect(body).toMatchObject({
+        ...dto,
+        userId: testUserId,
+      });
+
+      const txInDb = await prisma.transaction.findUnique({
+        where: { id: body.id },
+      });
+
+      expect(txInDb).toBeTruthy();
+      expect(txInDb).toMatchObject({
+        ...dto,
+        userId: testUserId,
+      });
+    });
   });
 
   /* ------------------------------------------------------------------------- */
   /*  GET /transactions                                                        */
   /* ------------------------------------------------------------------------- */
 
-  it('should list all transactions', async () => {
-    const { body } = await request(app.getHttpServer())
-      .get('/transactions')
-      .set('Authorization', authHeader)
-      .expect(200);
+  describe('GET /transactions', () => {
+    beforeEach(async () => {
+      await prisma.transaction.deleteMany({ where: { userId: testUserId } });
+      await prisma.transaction.createMany({
+        data: [
+          {
+            amount: 100,
+            type: 'send',
+            category: 'groceries',
+            recipient: 'x',
+            userId: testUserId,
+          },
+          {
+            amount: 200,
+            type: 'receive',
+            category: 'salary',
+            recipient: 'y',
+            userId: testUserId,
+          },
+          {
+            amount: 150,
+            type: 'send',
+            category: 'groceries',
+            recipient: 'z',
+            userId: testUserId,
+          },
+        ],
+      });
+    });
 
-    expect(Array.isArray(body)).toBe(true);
-    expect(body.length).toBeGreaterThanOrEqual(created.length);
-    created.forEach((tx) =>
-      expect(body).toEqual(
-        expect.arrayContaining([expect.objectContaining({ id: tx.id })]),
-      ),
-    );
-  });
+    it('should list all transactions', async () => {
+      const { body } = await request(app.getHttpServer())
+        .get('/transactions')
+        .set('Authorization', authHeader)
+        .expect(200);
 
-  it('should filter by type', async () => {
-    const { body } = await request(app.getHttpServer())
-      .get('/transactions')
-      .query({ type: 'send' })
-      .set('Authorization', authHeader)
-      .expect(200);
+      expect(Array.isArray(body)).toBe(true);
+      expect(body.length).toBe(3);
+    });
 
-    expect(body.every((tx: any) => tx.type === 'send')).toBe(true);
-  });
+    it('should filter by type', async () => {
+      const { body } = await request(app.getHttpServer())
+        .get('/transactions')
+        .query({ type: 'send' })
+        .set('Authorization', authHeader)
+        .expect(200);
 
-  it('should filter by category', async () => {
-    const { body } = await request(app.getHttpServer())
-      .get('/transactions')
-      .query({ category: 'groceries' })
-      .set('Authorization', authHeader)
-      .expect(200);
+      expect(body.every((tx: any) => tx.type === 'send')).toBe(true);
+      expect(body.length).toBe(2);
+    });
 
-    expect(body.every((tx: any) => tx.category === 'groceries')).toBe(true);
-  });
+    it('should filter by category', async () => {
+      const { body } = await request(app.getHttpServer())
+        .get('/transactions')
+        .query({ category: 'salary' })
+        .set('Authorization', authHeader)
+        .expect(200);
 
-  it('should filter by type AND category', async () => {
-    const { body } = await request(app.getHttpServer())
-      .get('/transactions')
-      .query({ type: 'send', category: 'e2e' })
-      .set('Authorization', authHeader)
-      .expect(200);
+      expect(body.every((tx: any) => tx.category === 'salary')).toBe(true);
+      expect(body.length).toBe(1);
+    });
 
-    expect(
-      body.every((tx: any) => tx.type === 'send' && tx.category === 'e2e'),
-    ).toBe(true);
-  });
+    it('should filter by type AND category', async () => {
+      const { body } = await request(app.getHttpServer())
+        .get('/transactions')
+        .query({ type: 'send', category: 'groceries' })
+        .set('Authorization', authHeader)
+        .expect(200);
 
-  it('should return empty array for non‑existent category', async () => {
-    const { body } = await request(app.getHttpServer())
-      .get('/transactions')
-      .query({ category: 'does-not-exist' })
-      .set('Authorization', authHeader)
-      .expect(200);
+      expect(
+        body.every(
+          (tx: any) => tx.type === 'send' && tx.category === 'groceries',
+        ),
+      ).toBe(true);
+      expect(body.length).toBe(2);
+    });
 
-    expect(body).toEqual([]);
+    it('should return empty array for unknown category', async () => {
+      const { body } = await request(app.getHttpServer())
+        .get('/transactions')
+        .query({ category: 'nonexistent' })
+        .set('Authorization', authHeader)
+        .expect(200);
+
+      expect(body).toEqual([]);
+    });
   });
 
   /* ------------------------------------------------------------------------- */
   /*  GET /transactions/summary                                                */
   /* ------------------------------------------------------------------------- */
 
-  it('should return total sent/received grouped by category', async () => {
-    const { body } = await request(app.getHttpServer())
-      .get('/transactions/summary')
-      .set('Authorization', authHeader)
-      .expect(200);
+  describe('GET /transactions/summary', () => {
+    beforeEach(async () => {
+      await prisma.transaction.deleteMany({ where: { userId: testUserId } });
 
-    // Build expected structure from the transactions we created in this test run
-    const expectedByCategory: Record<
-      string,
-      { sent: number; received: number }
-    > = {};
-    created.forEach((tx) => {
-      expectedByCategory[tx.category] ??= { sent: 0, received: 0 };
-      if (tx.type === 'send')
-        expectedByCategory[tx.category].sent += Number(tx.amount);
-      else expectedByCategory[tx.category].received += Number(tx.amount);
+      // Creamos una mezcla de categorías y tipos
+      await prisma.transaction.createMany({
+        data: [
+          {
+            amount: 100,
+            type: 'send',
+            category: 'groceries',
+            recipient: 'x',
+            userId: testUserId,
+          },
+          {
+            amount: 300,
+            type: 'receive',
+            category: 'salary',
+            recipient: 'y',
+            userId: testUserId,
+          },
+          {
+            amount: 200,
+            type: 'send',
+            category: 'groceries',
+            recipient: 'z',
+            userId: testUserId,
+          },
+          {
+            amount: 500,
+            type: 'send',
+            category: 'rent',
+            recipient: 'landlord',
+            userId: testUserId,
+          },
+          {
+            amount: 400,
+            type: 'receive',
+            category: 'freelance',
+            recipient: 'client',
+            userId: testUserId,
+          },
+          {
+            amount: 50,
+            type: 'send',
+            category: 'subscriptions',
+            recipient: 'spotify',
+            userId: testUserId,
+          },
+        ],
+      });
     });
 
-    // body must be an array of { category, sent, received }
-    expect(Array.isArray(body)).toBe(true);
-    Object.entries(expectedByCategory).forEach(([category, totals]) => {
+    it('should return correct grouped totals for multiple categories', async () => {
+      const { body } = await request(app.getHttpServer())
+        .get('/transactions/summary')
+        .set('Authorization', authHeader)
+        .expect(200);
+
+      expect(Array.isArray(body)).toBe(true);
+
       expect(body).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ category, ...totals }),
+          expect.objectContaining({
+            category: 'groceries',
+            sent: 300, // 100 + 200 send
+            received: 0,
+          }),
+          expect.objectContaining({
+            category: 'salary',
+            sent: 0,
+            received: 300,
+          }),
+          expect.objectContaining({
+            category: 'rent',
+            sent: 500,
+            received: 0,
+          }),
+          expect.objectContaining({
+            category: 'freelance',
+            sent: 0,
+            received: 400,
+          }),
+          expect.objectContaining({
+            category: 'subscriptions',
+            sent: 50,
+            received: 0,
+          }),
         ]),
       );
+    });
+
+    it('should not return unrelated categories', async () => {
+      const { body } = await request(app.getHttpServer())
+        .get('/transactions/summary')
+        .set('Authorization', authHeader)
+        .expect(200);
+
+      // Asegura que NO haya categorías que no insertamos
+      const categoriesReturned = body.map((row: any) => row.category);
+      expect(categoriesReturned).toEqual(
+        expect.arrayContaining([
+          'groceries',
+          'salary',
+          'rent',
+          'freelance',
+          'subscriptions',
+        ]),
+      );
+    });
+
+    it('should sum correctly when category has mixed send/receive', async () => {
+      // Hagamos una receive en groceries.
+      await prisma.transaction.create({
+        data: {
+          amount: 50,
+          type: 'receive',
+          category: 'groceries',
+          recipient: 'refund',
+          userId: testUserId,
+        },
+      });
+
+      const { body } = await request(app.getHttpServer())
+        .get('/transactions/summary')
+        .set('Authorization', authHeader)
+        .expect(200);
+
+      expect(body).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            category: 'groceries',
+            sent: 300,
+            received: 50,
+          }),
+        ]),
+      );
+    });
+
+    it('should return empty array if no transactions exist', async () => {
+      await prisma.transaction.deleteMany({ where: { userId: testUserId } });
+
+      const { body } = await request(app.getHttpServer())
+        .get('/transactions/summary')
+        .set('Authorization', authHeader)
+        .expect(200);
+
+      expect(body).toEqual([]);
     });
   });
 });
