@@ -1,20 +1,18 @@
 name: CI
 
 on:
+  pull_request: {}                 # PRs contra cualquier rama
   push:
-    branches: ["main", "develop"]
-  pull_request:
-    branches: ["main", "develop"]
+    branches: [main]               # merge a main = deploy-staging
   workflow_dispatch: {}
 
-# Cancel redundant runs from the same branch / PR
 concurrency:
-  group: ci-${{ github.head_ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-test:
-    name: Lint · Type‑check · Test
+    name: Lint • Type-check • Tests
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -23,77 +21,67 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: verde_money_test
-        ports: ["5432:5432"]
+        ports: ['5432:5432']
         options: >-
           --health-cmd="pg_isready -U postgres"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
+          --health-interval=10s --health-timeout=5s --health-retries=5
     env:
+      NODE_ENV: test
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/verde_money_test
       CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
-      TESTING_USER_ID: ${{ secrets.TESTING_USER_ID }}
-      NODE_ENV: test
+      TESTING_USER_ID:  ${{ secrets.TESTING_USER_ID }}
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use Node.js 20.x
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+      - run: npm run lint
+      - run: npm run type-check
+      - run: npm run test:ci
 
-      - name: Generate Prisma client
-        run: npx prisma generate
-
-      - name: Run migrations (dev)
-        run: npx prisma migrate deploy
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Type‑check
-        run: npm run type-check
-
-      - name: Unit & integration tests
-        run: npm run test:ci
-
-      - name: Upload coverage to Codecov · optional
-        if: success() && env.CODECOV_TOKEN != ''
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-  # Optional job — only runs when the workflow is manually dispatched OR a tag v*.*.* is pushed
-  deploy:
-    name: Build & Deploy (Docker)
+  # ---------- Previews para cada PR ----------
+  deploy-preview:
+    if: github.event_name == 'pull_request'
     needs: build-test
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    environment: production
+    environment:
+      name: pr-${{ github.event.number }}
+    steps:
+      - uses: actions/checkout@v4
+      # Ejemplo genérico; sustituye por tu proveedor de review-apps.
+      - run: echo 'Deploying preview…'
+
+  # ---------- Staging automático (main) ----------
+  deploy-staging:
+    if: github.ref == 'refs/heads/main'
+    needs: build-test
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      DATABASE_URL: ${{ secrets.DB_STAGING_URL }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & push image
-        uses: docker/build-push-action@v5
+      - uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
 
-      - name: Run Prisma migrate deploy on prod DB
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL_PROD }}
+      - name: Run prisma migrate deploy (staging)
         run: npx prisma migrate deploy
 
       - name: Notify Slack
@@ -101,9 +89,6 @@ jobs:
         uses: slackapi/slack-github-action@v1
         with:
           payload: |
-            {
-              "text": "${{ job.status }}: CI/CD pipeline for *${{ github.repository }}* (commit ${{ github.sha }})"
-            }
+            { "text": "*STAGING* · Build `${{ github.sha }}` → status: *${{ job.status }}*" }
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-

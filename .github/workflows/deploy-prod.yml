@@ -1,0 +1,43 @@
+name: Deploy Production
+
+on:
+  push:
+    tags: ['v*.*.*']            # ej. v1.4.1
+  workflow_dispatch: {}
+
+jobs:
+  deploy-prod:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      DATABASE_URL: ${{ secrets.DB_PROD_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+
+      - name: Run prisma migrate deploy (prod)
+        run: npx prisma migrate deploy
+
+      - name: Smoke health-check
+        run: curl -fsSL https://api.myapp.com/health || exit 1
+
+      - name: Notify Slack
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            { "text": ":rocket: *PROD* deploy `${{ github.ref_name }}` — *${{ job.status }}* (<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|details>)" }
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
