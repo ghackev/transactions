@@ -43,6 +43,6 @@ jobs:
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: transactions-api
-          image: $IMAGE
+          image: ${{ env.IMAGE }}
           region: us-central1
           secrets: DATABASE_URL=DATABASE_URL:latest
