@@ -38,25 +38,14 @@ jobs:
       - name: Build & push Docker image
         run: |
           IMAGE="us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/transactions-api/transactions-api:$GITHUB_SHA"
-          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
           docker build -t $IMAGE .
           docker push $IMAGE
 
       - name: Run Prisma migrate via Cloud Run Job
         run: |
-          gcloud run jobs create migrate-transactions \
-            --image "$IMAGE" \
-            --region "$REGION" \
-            --set-cloudsql-instances="$CLOUD_SQL_CONNECTION_NAME" \
-            --set-env-vars="DATABASE_URL=$DATABASE_URL" \
-            --command "npx" --args "prisma,migrate,deploy" || true
-
-          gcloud run jobs update migrate-transactions \
-            --image "$IMAGE" \
-            --region "$REGION" \
-            --set-cloudsql-instances="$CLOUD_SQL_CONNECTION_NAME" \
-            --set-env-vars="DATABASE_URL=$DATABASE_URL" \
-            --command "npx" --args "prisma,migrate,deploy"
+          gcloud run jobs create migrate-transactions --image "$IMAGE" --region "$REGION" --set-cloudsql-instances="$CLOUD_SQL_CONNECTION_NAME" --set-env-vars="DATABASE_URL=$DATABASE_URL" --command "npx" --args "prisma,migrate,deploy" || true
+          gcloud run jobs update migrate-transactions --image "$IMAGE" --region "$REGION" --set-cloudsql-instances="$CLOUD_SQL_CONNECTION_NAME" --set-env-vars="DATABASE_URL=$DATABASE_URL" --command "npx" --args "prisma,migrate,deploy"
+          gcloud run jobs execute migrate-transactions --region "$REGION" --wait
 
       - name: Deploy Cloud Run service
         uses: google-github-actions/deploy-cloudrun@v2
