@@ -1,7 +1,7 @@
 name: PR Tests with Docker
 permissions:
   contents: read
-  
+
 on:
   pull_request:
     branches: [ main ]
@@ -58,7 +58,6 @@ jobs:
       - name: Run unit tests
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
-          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
           CLERK_SECRET_KEY:       ${{ secrets.CLERK_SECRET_KEY }}
           TESTING_USER_ID:        ${{ secrets.TESTING_USER_ID }}
         run: npm run test
