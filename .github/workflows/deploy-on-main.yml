@@ -47,13 +47,13 @@ jobs:
             --image $IMAGE \
             --region us-central1 \
             --set-cloudsql-instances=${{ env.CLOUD_SQL_CONNECTION_NAME }} \
-            --set-env-vars DATABASE_URL=${{ env.DATABASE_URL }} \
+            --set-env-vars="DATABASE_URL='${{ env.DATABASE_URL }}'" \
             --command "npx" --args "prisma,migrate,deploy" || \
           gcloud run jobs update migrate-transactions \
             --image $IMAGE \
             --region us-central1 \
             --set-cloudsql-instances=${{ env.CLOUD_SQL_CONNECTION_NAME }} \
-            --set-env-vars DATABASE_URL=${{ env.DATABASE_URL }} \
+            --set-env-vars="DATABASE_URL='${{ env.DATABASE_URL }}'" \
             --command "npx" --args "prisma,migrate,deploy"
 
           gcloud run jobs execute migrate-transactions \
