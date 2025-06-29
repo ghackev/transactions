@@ -8,7 +8,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production
-    
+
     env:
       CLOUD_SQL_PROJECT: ${{ secrets.GCP_PROJECT }}
       CLOUD_SQL_REGION: ${{ secrets.CLOUD_SQL_REGION }}
@@ -37,7 +37,7 @@ jobs:
 
       - name: Build & push Docker image
         run: |
-          IMAGE="us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/transactions-api:$GITHUB_SHA"
+          IMAGE="us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/transactions-api/transactions-api:$GITHUB_SHA"
           docker build -t $IMAGE .
           docker push $IMAGE
 
