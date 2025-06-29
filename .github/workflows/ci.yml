@@ -1,5 +1,7 @@
 name: PR Tests with Docker
-
+permissions:
+  contents: read
+  
 on:
   pull_request:
     branches: [ main ]
@@ -8,58 +10,55 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
-    steps:
-      - uses: actions/checkout@v4
-
-      # 1) Build your app image
-      - name: Build API image
-        run: |
-          docker build -t api-under-test .
-
-      # 2) Start Postgres container
-      - name: Run Postgres
-        run: |
-          docker network create test-net || true
-          docker run -d --rm \
-            --name pg-test \
-            --network test-net \
-            -e POSTGRES_USER=postgres \
-            -e POSTGRES_PASSWORD=postgres \
-            -e POSTGRES_DB=test_db \
-            postgres:17
-
-      # 3) Wait for Postgres to be ready
-      - name: Wait for Postgres
-        run: |
-          until docker exec pg-test pg_isready -U postgres -d test_db; do
-            sleep 1
-          done
-
-      # 4) Run your API container pointing at pg-test
-      - name: Run API
+    # Levanta un Postgres en localhost:5432 dentro del runner
+    services:
+      postgres:
+        image: postgres:17
         env:
-          DATABASE_URL: postgres://postgres:postgres@pg-test:5432/test_db
-        run: |
-          docker run -d --rm \
-            --name app-test \
-            --network test-net \
-            -e DATABASE_URL \
-            api-under-test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d test_db"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
 
-      # 5) Wait for your API to be healthy
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and generate Prisma client
+        run: |
+          npx prisma generate
+          npm run build
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Start API locally
+        run: npm run start &
+
       - name: Wait for API
-        run: |
-          until curl -sf http://localhost:3000/api/health; do
-            sleep 1
-          done
+        run: npx wait-on http://localhost:3000/api/health
 
-      # 6) Execute tests (e2e or integration)
-      - name: E2E Tests
-        run: |
-          docker exec app-test npm test
-
-      # 7) Tear down
-      - name: Cleanup
-        run: |
-          docker stop app-test pg-test
-          docker network rm test-net
+      - name: Run unit tests
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY:       ${{ secrets.CLERK_SECRET_KEY }}
+          TESTING_USER_ID:        ${{ secrets.TESTING_USER_ID }}
+        run: npm run test
