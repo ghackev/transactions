@@ -8,6 +8,22 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
+    # Levanta un Postgres en localhost:5432 dentro del runner
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d test_db"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
 
@@ -27,23 +43,6 @@ jobs:
         run: |
           npx prisma generate
           npm run build
-
-      - name: Start Postgres container
-        run: |
-          docker network create test-net || true
-          docker run -d --rm \
-            --name pg-test \
-            --network test-net \
-            -e POSTGRES_USER=postgres \
-            -e POSTGRES_PASSWORD=postgres \
-            -e POSTGRES_DB=test_db \
-            postgres:17
-
-      - name: Wait for Postgres ready
-        run: |
-          until docker exec pg-test pg_isready -U postgres -d test_db; do
-            sleep 1
-          done
 
       - name: Apply migrations
         run: npx prisma migrate deploy
