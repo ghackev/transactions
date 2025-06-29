@@ -59,10 +59,10 @@ jobs:
             --command "npx" --args "prisma,migrate,deploy"
 
       - name: Deploy Cloud Run service
-          uses: google-github-actions/deploy-cloudrun@v2
-          with:
-            service: transactions-api
-            image: $IMAGE
-            region: us-central1
-            env_vars: DATABASE_URL=${{ env.DATABASE_URL }}
-            cloudsql_instances: ${{ secrets.CLOUD_SQL_CONNECTION_NAME }}
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: transactions-api
+          image: $IMAGE
+          region: us-central1
+          env_vars: DATABASE_URL=${{ env.DATABASE_URL }}
+          cloudsql_instances: ${{ secrets.CLOUD_SQL_CONNECTION_NAME }}
