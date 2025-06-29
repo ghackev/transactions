@@ -55,4 +55,4 @@ jobs:
           image: $IMAGE
           region: us-central1
           vpc_connector: ${{ secrets.VPC_CONNECTOR }}
-          env_vars: DATABASE_URL=${{ env.DATABASE_URL }}
+          env_vars: DATABASE_URL=${{ env.DATABASE_URL }} 
