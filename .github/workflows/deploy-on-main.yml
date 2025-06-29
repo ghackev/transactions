@@ -45,4 +45,4 @@ jobs:
           service: transactions-api
           image: $IMAGE
           region: us-central1
-          env_vars: DATABASE_URL=${{ secrets.DATABASE_URL }}
+          secrets: DATABASE_URL=DATABASE_URL:latest
