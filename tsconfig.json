@@ -1,3 +1,4 @@
+// tsconfig.json
 {
   "compilerOptions": {
     "module": "commonjs",
@@ -9,6 +10,7 @@
     "target": "ES2023",
     "sourceMap": true,
     "outDir": "./dist",
+    "rootDir": "./src",               // <— indicamos dónde empieza tu código TS
     "baseUrl": "./",
     "incremental": true,
     "skipLibCheck": true,
@@ -17,5 +19,17 @@
     "noImplicitAny": false,
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false
-  }
+  },
+  "include": ["src/**/*"],            // <— solo esto se compila
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test",
+    "**/*.spec.ts",
+    "jest.config.ts",
+    "jest.config.*.ts",
+    ".dockerignore",
+    "*.env",
+    "README.md"
+  ]
 }

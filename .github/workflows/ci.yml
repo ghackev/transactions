@@ -1,94 +1,65 @@
-name: CI
+name: PR Tests with Docker
 
 on:
-  pull_request: {}                 # PRs contra cualquier rama
-  push:
-    branches: [main]               # merge a main = deploy-staging
-  workflow_dispatch: {}
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  pull_request:
+    branches: [ main ]
 
 jobs:
-  build-test:
-    name: Lint • Type-check • Tests
+  build-and-test:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1) Build your app image
+      - name: Build API image
+        run: |
+          docker build -t api-under-test .
+
+      # 2) Start Postgres container
+      - name: Run Postgres
+        run: |
+          docker network create test-net || true
+          docker run -d --rm \
+            --name pg-test \
+            --network test-net \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=test_db \
+            postgres:17
+
+      # 3) Wait for Postgres to be ready
+      - name: Wait for Postgres
+        run: |
+          until docker exec pg-test pg_isready -U postgres -d test_db; do
+            sleep 1
+          done
+
+      # 4) Run your API container pointing at pg-test
+      - name: Run API
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: verde_money_test
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd="pg_isready -U postgres"
-          --health-interval=10s --health-timeout=5s --health-retries=5
-    env:
-      NODE_ENV: test
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/verde_money_test
-      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
-      TESTING_USER_ID:  ${{ secrets.TESTING_USER_ID }}
+          DATABASE_URL: postgres://postgres:postgres@pg-test:5432/test_db
+        run: |
+          docker run -d --rm \
+            --name app-test \
+            --network test-net \
+            -e DATABASE_URL \
+            api-under-test
 
-    steps:
-      - uses: actions/checkout@v4
+      # 5) Wait for your API to be healthy
+      - name: Wait for API
+        run: |
+          until curl -sf http://localhost:3000/api/health; do
+            sleep 1
+          done
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
+      # 6) Execute tests (e2e or integration)
+      - name: E2E Tests
+        run: |
+          docker exec app-test npm test
 
-      - run: npm ci
-      - run: npx prisma generate
-      - run: npx prisma migrate deploy
-      - run: npm run lint
-      - run: npm run type-check
-      - run: npm run test:ci
-
-  # ---------- Previews para cada PR ----------
-  deploy-preview:
-    if: github.event_name == 'pull_request'
-    needs: build-test
-    runs-on: ubuntu-latest
-    environment:
-      name: pr-${{ github.event.number }}
-    steps:
-      - uses: actions/checkout@v4
-      # Ejemplo genérico; sustituye por tu proveedor de review-apps.
-      - run: echo 'Deploying preview…'
-
-  # ---------- Staging automático (main) ----------
-  deploy-staging:
-    if: github.ref == 'refs/heads/main'
-    needs: build-test
-    runs-on: ubuntu-latest
-    environment: staging
-    env:
-      DATABASE_URL: ${{ secrets.DB_STAGING_URL }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
-
-      - name: Run prisma migrate deploy (staging)
-        run: npx prisma migrate deploy
-
-      - name: Notify Slack
-        if: always()
-        uses: slackapi/slack-github-action@v1
-        with:
-          payload: |
-            { "text": "*STAGING* · Build `${{ github.sha }}` → status: *${{ job.status }}*" }
-        env:
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      # 7) Tear down
+      - name: Cleanup
+        run: |
+          docker stop app-test pg-test
+          docker network rm test-net
