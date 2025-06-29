@@ -9,6 +9,15 @@ const config: Config = {
   },
   collectCoverageFrom: ['src/**/*.(t|j)s', '!src/main.ts'],
   coverageDirectory: 'coverage/all',
+  collectCoverage: true,
+  coverageThreshold: {
+    global: {
+      branches: 80,
+      functions: 85,
+      lines: 90,
+      statements: 90
+    }
+  },
   testEnvironment: 'node',
 };
 
