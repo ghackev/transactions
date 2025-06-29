@@ -5,8 +5,6 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { ClerkAuthGuard } from './auth/clerk-auth.guard';
 import { TransactionsModule } from './transactions/transactions.module';
-import { TransactionsService } from './transactions/transactions.service';
-import { TransactionsController } from './transactions/transactions.controller';
 import { HealthController } from './health/health.controller';
 
 @Module({
