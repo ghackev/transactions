@@ -44,11 +44,9 @@ jobs:
 
       - name: Run Prisma migrate via Cloud Run Job
         run: |
-          gcloud run jobs create migrate-transactions --image "$IMAGE" --region us-central1 --set-cloudsql-instances="${{ env.CLOUD_SQL_CONNECTION_NAME }}" --set-env-vars="DATABASE_URL='${{ env.DATABASE_URL }}'" --command "npx" --args "prisma,migrate,deploy" || \
-          gcloud run jobs update migrate-transactions --image "$IMAGE" --region us-central1 --set-cloudsql-instances="${{ env.CLOUD_SQL_CONNECTION_NAME }}" --set-env-vars="DATABASE_URL='${{ env.DATABASE_URL }}'" --command "npx" --args "prisma,migrate,deploy"
-
+          gcloud run jobs create migrate-transactions --image "$IMAGE" --region us-central1 --vpc-connector=${{ secrets.VPC_CONNECTOR }} --set-env-vars="DATABASE_URL=${{ env.DATABASE_URL }}" --command "npx" --args "prisma,migrate,deploy" || true
+          gcloud run jobs update migrate-transactions --image "$IMAGE" --region us-central1 --vpc-connector=${{ secrets.VPC_CONNECTOR }} --set-env-vars="DATABASE_URL=${{ env.DATABASE_URL }}" --command "npx" --args "prisma,migrate,deploy"
           gcloud run jobs execute migrate-transactions --region us-central1 --wait
-
 
       - name: Deploy Cloud Run service
         uses: google-github-actions/deploy-cloudrun@v2
@@ -56,5 +54,5 @@ jobs:
           service: transactions-api
           image: $IMAGE
           region: us-central1
-          set-cloudsql-instances: ${{ env.CLOUD_SQL_CONNECTION_NAME }}
+          vpc_connector: ${{ secrets.VPC_CONNECTOR }}
           env_vars: DATABASE_URL=${{ env.DATABASE_URL }}
