@@ -43,6 +43,7 @@ jobs:
           docker run -d --rm \
             --name app-test \
             --network test-net \
+            -p 3000:3000 \
             -e DATABASE_URL \
             api-under-test
 
