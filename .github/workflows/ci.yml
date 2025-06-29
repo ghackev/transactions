@@ -8,16 +8,27 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # 1) Build your app image
-      - name: Build API image
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and generate Prisma client
         run: |
-          docker build -t api-under-test .
+          npx prisma generate
+          npm run build
 
-      # 2) Start Postgres container
-      - name: Run Postgres
+      - name: Start Postgres container
         run: |
           docker network create test-net || true
           docker run -d --rm \
@@ -28,39 +39,23 @@ jobs:
             -e POSTGRES_DB=test_db \
             postgres:17
 
-      # 3) Wait for Postgres to be ready
-      - name: Wait for Postgres
+      - name: Wait for Postgres ready
         run: |
           until docker exec pg-test pg_isready -U postgres -d test_db; do
             sleep 1
           done
 
-      # 4) Run your API container pointing at pg-test
-      - name: Run API
-        env:
-          DATABASE_URL: postgres://postgres:postgres@pg-test:5432/test_db
-        run: |
-          docker run -d --rm \
-            --name app-test \
-            --network test-net \
-            -p 3000:3000 \
-            -e DATABASE_URL \
-            api-under-test
+      - name: Apply migrations
+        run: npx prisma migrate deploy
 
-      # 5) Wait for your API to be healthy
+      - name: Start API locally
+        run: npm run start &
+
       - name: Wait for API
-        run: |
-          until curl -sf http://localhost:3000/api/health; do
-            sleep 1
-          done
+        run: npx wait-on http://localhost:3000/api/health
 
-      # 6) Execute tests (e2e or integration)
-      - name: E2E Tests
-        run: |
-          docker exec app-test npm test
+      - name: Run tests
+        run: npm test
 
-      # 7) Tear down
-      - name: Cleanup
-        run: |
-          docker stop app-test pg-test
-          docker network rm test-net
+      - name: Teardown
+        run: pkill -f "node dist/main.js"
