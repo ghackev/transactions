@@ -16,7 +16,7 @@ jobs:
 
       CLOUD_SQL_CONNECTION_NAME: "${{ secrets.GCP_PROJECT }}:${{ secrets.CLOUD_SQL_REGION }}:${{ secrets.CLOUD_SQL_INSTANCE_ID }}"
 
-      DATABASE_URL: "postgresql://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@/${{ secrets.DB_NAME }}?host=/cloudsql/${{ secrets.GCP_PROJECT }}:${{ secrets.CLOUD_SQL_REGION }}:${{ secrets.CLOUD_SQL_INSTANCE_ID }}"
+      DATABASE_URL: "postgresql://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@${{ secrets.DB_HOST }}:5432/${{ secrets.DB_NAME }}"
 
     steps:
       - name: Checkout
