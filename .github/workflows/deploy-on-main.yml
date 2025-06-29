@@ -1,5 +1,6 @@
-# .github/workflows/deploy-on-main.yml
 name: Deploy to Prod
+permissions:
+  contents: read
 
 on:
   push:
