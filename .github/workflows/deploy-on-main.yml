@@ -48,7 +48,7 @@ jobs:
           docker push $IMAGE
 
       - name: Start Cloud SQL Proxy
-        uses: google-github-actions/cloud-sql-proxy@v0.12.0
+        uses: google-github-actions/cloud-sql-proxy@v2
         with:
           instance: ${{ env.CLOUD_SQL_CONNECTION_NAME }}
           port: 5432
