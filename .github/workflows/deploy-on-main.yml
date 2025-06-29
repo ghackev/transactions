@@ -1,6 +1,4 @@
 name: Deploy to Prod
-permissions:
-  contents: read
 
 on:
   push:
@@ -9,34 +7,29 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: production
 
     env:
-      # Secrets desglosados para Cloud SQL
-      CLOUD_SQL_PROJECT:      ${{ secrets.CLOUD_SQL_PROJECT }}
-      CLOUD_SQL_REGION:       ${{ secrets.CLOUD_SQL_REGION }}
-      CLOUD_SQL_INSTANCE_ID:  ${{ secrets.CLOUD_SQL_INSTANCE_ID }}
+      CLOUD_SQL_PROJECT: ${{ secrets.GCP_PROJECT }}
+      CLOUD_SQL_REGION: ${{ secrets.CLOUD_SQL_REGION }}
+      CLOUD_SQL_INSTANCE_ID: ${{ secrets.CLOUD_SQL_INSTANCE_ID }}
 
-      # Secrets desglosados para la BD
-      DB_USER:      ${{ secrets.DB_USER }}
-      DB_PASSWORD:  ${{ secrets.DB_PASSWORD }}
-      DB_NAME:      ${{ secrets.DB_NAME }}
-      DB_HOST:      ${{ secrets.DB_HOST }}    # normalmente /cloudsql/PROJECT:REGION:INSTANCE
+      CLOUD_SQL_CONNECTION_NAME: "${{ secrets.GCP_PROJECT }}:${{ secrets.CLOUD_SQL_REGION }}:${{ secrets.CLOUD_SQL_INSTANCE_ID }}"
 
-      # Cadena de conexión de Cloud SQL (project:region:instance)
-      CLOUD_SQL_CONNECTION_NAME: "${{ secrets.CLOUD_SQL_PROJECT }}:${{ secrets.CLOUD_SQL_REGION }}:${{ secrets.CLOUD_SQL_INSTANCE_ID }}"
-
-      # URL completa de la base de datos
-      DATABASE_URL: "postgresql://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@${{ secrets.DB_HOST }}:5432/${{ secrets.DB_NAME }}"
+      DATABASE_URL: "postgresql://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@/${{ secrets.DB_NAME }}?host=/cloudsql/${{ secrets.GCP_PROJECT }}:${{ secrets.CLOUD_SQL_REGION }}:${{ secrets.CLOUD_SQL_INSTANCE_ID }}"
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Authenticate to GCP
-        uses: google-github-actions/auth@v1
+        uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT }}
 
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker us-central1-docker.pkg.dev
@@ -47,25 +40,29 @@ jobs:
           docker build -t $IMAGE .
           docker push $IMAGE
 
-      - name: Start Cloud SQL Proxy
-        uses: google-github-actions/cloud-sql-proxy@v2
-        with:
-          instance: ${{ env.CLOUD_SQL_CONNECTION_NAME }}
-          port: 5432
-
-      - name: Apply database migrations
-        run: npx prisma migrate deploy
-        env:
-          DATABASE_URL: ${{ env.DATABASE_URL }}
-
-      - name: Deploy to Cloud Run
+      - name: Run Prisma migrate via Cloud Run Job
         run: |
-          gcloud run deploy transactions-api \
-            --image us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/transactions-api:$GITHUB_SHA \
+          gcloud run jobs create migrate-transactions \
+            --image $IMAGE \
             --region us-central1 \
-            --platform managed \
-            --allow-unauthenticated \
-            --add-cloudsql-instances=${{ env.CLOUD_SQL_CONNECTION_NAME }} \
-            --set-env-vars DATABASE_URL=${{ env.DATABASE_URL }}
-        env:
-          GCP_PROJECT: ${{ secrets.GCP_PROJECT }}
+            --set-cloudsql-instances=${{ env.CLOUD_SQL_CONNECTION_NAME }} \
+            --set-env-vars DATABASE_URL=${{ env.DATABASE_URL }} \
+            --command "npx" --args "prisma,migrate,deploy" || \
+          gcloud run jobs update migrate-transactions \
+            --image $IMAGE \
+            --region us-central1 \
+            --set-cloudsql-instances=${{ env.CLOUD_SQL_CONNECTION_NAME }} \
+            --set-env-vars DATABASE_URL=${{ env.DATABASE_URL }} \
+            --command "npx" --args "prisma,migrate,deploy"
+
+          gcloud run jobs execute migrate-transactions \
+            --region us-central1 --wait
+
+      - name: Deploy Cloud Run service
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: transactions-api
+          image: $IMAGE
+          region: us-central1
+          set-cloudsql-instances: ${{ env.CLOUD_SQL_CONNECTION_NAME }}
+          env_vars: DATABASE_URL=${{ env.DATABASE_URL }}
