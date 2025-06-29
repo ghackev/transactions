@@ -53,8 +53,13 @@ jobs:
       - name: Wait for API
         run: npx wait-on http://localhost:3000/api/health
 
-      - name: Run tests
-        run: npm test
+      - name: Run unit tests
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY:       ${{ secrets.CLERK_SECRET_KEY }}
+          TESTING_USER_ID:        ${{ secrets.TESTING_USER_ID }}
+        run: npm run test
 
       - name: Teardown
         run: pkill -f "node dist/main.js"
