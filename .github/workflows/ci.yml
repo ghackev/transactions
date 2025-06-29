@@ -60,6 +60,3 @@ jobs:
           CLERK_SECRET_KEY:       ${{ secrets.CLERK_SECRET_KEY }}
           TESTING_USER_ID:        ${{ secrets.TESTING_USER_ID }}
         run: npm run test
-
-      - name: Teardown
-        run: pkill -f "node dist/main.js"
