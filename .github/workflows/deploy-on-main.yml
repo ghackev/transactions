@@ -38,6 +38,7 @@ jobs:
       - name: Build & push Docker image
         run: |
           IMAGE="us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/transactions-api/transactions-api:$GITHUB_SHA"
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
           docker build -t $IMAGE .
           docker push $IMAGE
 
