@@ -101,15 +101,15 @@ describe('Transactions E2E — TC001–TC010', () => {
     //2. Response body contains an error message indicating which required fields are missing.
     expect(res.body.message).toEqual(
       expect.arrayContaining([
-        "Amount must be a positive number.",
-        "Type must be either send or receive.",
-        "Category must be between 2 and 50 characters.",
-        "Category must not be empty.",
-        "Category must be a string.",
-        "Recipient must be between 2 and 100 characters.",
-        "Recipient must not be empty.",
-        "Recipient must be a string."
-      ])
+        'Amount must be a positive number.',
+        'Type must be either send or receive.',
+        'Category must be between 2 and 50 characters.',
+        'Category must not be empty.',
+        'Category must be a string.',
+        'Recipient must be between 2 and 100 characters.',
+        'Recipient must not be empty.',
+        'Recipient must be a string.',
+      ]),
     );
     expect(res.body.message).toHaveLength(8);
     //3. No transaction is created in the database.

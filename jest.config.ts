@@ -1,13 +1,20 @@
 import type { Config } from 'jest';
 
-const baseConfig: Omit<Config, 'displayName' | 'testRegex' | 'coverageDirectory' | 'collectCoverage' | 'coverageThreshold'> = {
+const baseConfig: Omit<
+  Config,
+  | 'displayName'
+  | 'testRegex'
+  | 'coverageDirectory'
+  | 'collectCoverage'
+  | 'coverageThreshold'
+> = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: '.',
   transform: {
-    '^.+\\.(t|j)s$': 'ts-jest'
+    '^.+\\.(t|j)s$': 'ts-jest',
   },
   collectCoverageFrom: ['src/**/*.(t|j)s', '!src/main.ts'],
-  testEnvironment: 'node'
+  testEnvironment: 'node',
 };
 
 const config: Config = {
@@ -22,17 +29,17 @@ const config: Config = {
           branches: 80,
           functions: 85,
           lines: 90,
-          statements: 90
-        }
-      }
+          statements: 90,
+        },
+      },
     },
     {
       ...baseConfig,
       displayName: 'e2e',
       testRegex: '.*\\.e2e-spec\\.ts$',
       coverageDirectory: 'coverage/e2e',
-    }
-  ]
+    },
+  ],
 };
 
 export default config;
