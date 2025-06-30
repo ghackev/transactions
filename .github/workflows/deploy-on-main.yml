@@ -47,7 +47,7 @@ jobs:
           region: us-central1
           secrets: DATABASE_URL=DATABASE_URL:latest
 
-            - name: Notify Slack of Deployment Status
+      - name: Notify Slack of Deployment Status
         if: always()
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
