@@ -1,0 +1,69 @@
+name: PR Tests with Docker
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d test_db"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=2
+
+    env:
+      DATABASE_URL: ${{ env.DATABASE_URL }}
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+      TESTING_USER_ID: ${{ secrets.TESTING_USER_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check Types
+        run: npx tsc --noEmit
+
+      - name: Build and generate Prisma client
+        run: |
+          npx prisma generate
+          npm run build
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Start API locally
+        run: npm run start &
+
+      - name: Wait for API and DB
+        run: npx wait-on http://localhost:3000/api/health
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+      - name: Run E2E tests
+        run: npm run test:e2e

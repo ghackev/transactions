@@ -1,0 +1,93 @@
+name: Deploy to Prod
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev
+
+      - name: Build & push Docker image
+        run: |
+          IMAGE="us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/transactions-api/transactions-api:$GITHUB_SHA"
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+          docker build -t $IMAGE .
+          docker push $IMAGE
+
+      - name: Run Prisma migrate via Cloud Run Job
+        run: |
+          gcloud run jobs create migrate-transactions --image "$IMAGE" --region us-central1 --set-env-vars="DATABASE_URL=${{ secrets.DATABASE_URL }}" --command "npx" --args "prisma,migrate,deploy" || true
+          gcloud run jobs update migrate-transactions --image "$IMAGE" --region us-central1 --set-env-vars="DATABASE_URL=${{ secrets.DATABASE_URL }}" --command "npx" --args "prisma,migrate,deploy"
+          gcloud run jobs execute migrate-transactions --region us-central1 --wait
+
+      - name: Deploy Cloud Run service
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: transactions-api
+          image: ${{ env.IMAGE }}
+          region: us-central1
+          secrets: DATABASE_URL=DATABASE_URL:latest
+
+      - name: Notify Slack of Deployment Status
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          STATUS="✅ *Deployment succeeded!*"
+          if [ "${{ job.status }}" != "success" ]; then
+            STATUS="❌ *Deployment failed!*"
+          fi
+
+          curl -X POST -H "Content-Type: application/json" -d '{
+            "text": "Deploy Status",
+            "blocks": [
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "'"$STATUS"'"
+                }
+              },
+              {
+                "type": "section",
+                "fields": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Branch:*\n'"${{ github.ref }}"'"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Commit:*\n<'"${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"'|'"${{ github.sha }}"'>"
+                  }
+                ]
+              },
+              {
+                "type": "context",
+                "elements": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "<'"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"'|View Deployment Logs>"
+                  }
+                ]
+              }
+            ]
+          }' $SLACK_WEBHOOK_URL
