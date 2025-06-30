@@ -1,37 +1,231 @@
-# Transactions Backend
+## Transactions Backend
 
-This project implements a REST API for recording and retrieving financial transactions. It is built with **NestJS** and **Prisma** on top of PostgreSQL and authenticates users through **Clerk**.  
-A running instance is available at **INSERT URL**.
+This project implements a secure REST API for recording and retrieving financial transactions. It is built with **NestJS** and **Prisma** on top of **PostgreSQL**, and authenticates users through **Clerk** to ensure that all data is scoped per authenticated user.
+
+The repository assumes a **GitHub Flow** branching strategy:
+- All development work is done in feature branches.
+- Pull requests (PRs) target the `main` branch.
+- Automated tests and lint checks run on every PR.
+- When a PR is merged into `main`, the CI/CD pipeline automatically deploys the latest version to the production environment.
+- During deployment, database **migrations are automatically applied** to keep the schema up to date with the application code.
+
+This ensures that changes are tested, reviewed, deployed, and the database is migrated safely with minimal manual intervention.
+
+## Production Deployment
+
+The production instance is deployed at:
+
+👉 [https://transactions-api-992313983967.us-central1.run.app/api/](https://transactions-api-992313983967.us-central1.run.app/api/)
+
+> ⚠️ Note: The root path `/api/` does not expose a public index route.
+> The available endpoints are under `/api/transactions` and require authentication.
+> Example:
+> - `POST /api/transactions` — Create a transaction
+> - `GET /api/transactions` — List transactions for the authenticated user
+
+You can test the API by calling these endpoints with a valid Clerk authentication token.
+
+### Authentication
+
+Authentication is handled using a **custom Passport strategy** and a dedicated NestJS **Auth Guard** that integrates with **Clerk**.
+
+- **`ClerkStrategy`** (`clerk.strategy.ts`):
+  - Uses `passport-custom` to implement a `'clerk'` strategy.
+  - Extracts the `Authorization` header and verifies the JWT using Clerk’s `verifyToken` with your `CLERK_SECRET_KEY`.
+  - If valid, retrieves the full user object from Clerk and attaches it to the request.
+  - Throws an `UnauthorizedException` if the token is invalid or missing.
+
+- **`ClerkAuthGuard`** (`clerk-auth.guard.ts`):
+  - Extends NestJS’s `AuthGuard` for the `'clerk'` strategy.
+  - Uses `Reflector` to check for a custom `@Public()` decorator — if present, the route is publicly accessible (e.g., `GET /api/health`).
+  - Otherwise, enforces full Clerk authentication and injects the user into the request context.
+
+This approach guarantees:
+- All protected endpoints require a valid Clerk JWT.
+- Public routes are explicit and isolated.
+- Controllers and services remain simple, only requiring the verified `userId`.
+
+**End-to-End Tests:**  
+In the end-to-end (e2e) tests, the same Clerk token validation flow is used. Valid test tokens sessions are generated to simulate real authenticated requests, verifying that the system enforces user scoping correctly.
+
+**Unit Tests:**
+Authentication is not re-validated at the service layer in unit tests. Instead, each test explicitly passes a `userId` parameter to simulate a verified user context, as would be provided by the authentication guard in production.
+
+## API Design
+
+The Transactions API is designed following a clean layered architecture with strong security, validation, and clear separation of concerns.
+
+### DTOs
+
+- **`CreateTransactionDto`** and **`TransactionsQueryDto`** define strict contracts for incoming request payloads and query parameters.
+- `class-validator` decorators ensure that every input (`amount`, `type`, `category`, `recipient`) is validated automatically before any business logic runs.
+- Optional filters (`type` and `category`) are handled gracefully for flexible queries.
+
+### Controller
+
+- **`TransactionsController`** exposes three REST endpoints:
+  - `POST /transactions` — Creates a new transaction for the authenticated user.
+  - `GET /transactions` — Lists all transactions for the authenticated user, with optional filters.
+  - `GET /transactions/summary` — Returns a grouped summary (totals by `category` and `type`).
+
+- The controller uses `@UseGuards(ClerkAuthGuard)` to protect all routes by default.
+- It extracts the authenticated `userId` from Clerk’s session claims and passes it to the service layer.
+- Uses `ValidationPipe` to enforce DTO constraints at the request level.
+
+### Service
+
+- **`TransactionsService`** encapsulates all business logic and database operations.
+- Prisma is used for safe, type-checked interactions with the PostgreSQL database.
+- All methods explicitly require a `userId`, ensuring every query or mutation is scoped to the authenticated user.
+- `summary` uses `groupBy` to calculate totals and transforms the raw Prisma result into a simple, client-friendly format.
+
+**Benefits:**
+- Strong separation of concerns with DTOs, controllers, services, guards, and strategy.
+- Built-in multi-tenancy: every query is user-scoped by design.
+- Easy to extend with more endpoints.
+- Secure by default: Clerk JWTs verified for every request.
+
+**Possible Improvements:**
+- Add pagination for `GET /transactions` to handle large datasets.
+- Add rate limiting and monitoring.
+- Add API versioning (e.g., `/api/v1/transactions`).
+
+### Testing: Unit & End-to-End
+
+This project uses a **dual testing strategy** to ensure both **isolated correctness** and **real-world behavior** are fully covered.
+
+---
+
+**Unit Tests**
+
+- Unit tests for the `TransactionsService` verify that all business logic interacts with the database layer correctly.
+- The `PrismaService` is fully mocked using Jest. This means tests do not touch the real database and run very fast.
+- Each method (`create`, `findAll`, `summary`) is tested to ensure:
+  - The `userId` is always included in every query (`where` clause) or creation (`data`), enforcing strict multi-tenancy.
+  - Filters like `type` and `category` are applied correctly.
+  - Prisma’s `groupBy` results are transformed as expected into a clean summary format.
+- These tests guarantee that the **core logic behaves correctly**, even if Prisma or the HTTP layer changes.
+
+---
+
+**End-to-End (E2E) Tests**
+
+- The E2E tests run the entire **NestJS application** with all modules, guards, and pipes exactly as in production.
+- They use **`supertest`** to make real HTTP requests against the running server.
+- A valid **Clerk JWT** is generated dynamically using `@clerk/backend` and injected as a `Bearer` token in the request. This means the real `ClerkAuthGuard` and `ClerkStrategy` logic run end-to-end.
+- Tests cover:
+  - **Auth failures:** requests without a token or with an invalid token are rejected with `401 Unauthorized`.
+  - **Input validation:** invalid payloads (e.g., missing required fields, wrong types, negative amounts) return `400 Bad Request`.
+  - **Persistence:** successful `POST /transactions` calls insert data into the real test database, which is verified afterwards with direct Prisma queries.
+  - **Filtering:** `GET /transactions` with combinations of `type` and `category` confirms that only matching records are returned.
+  - **Aggregation:** `GET /transactions/summary` checks that grouped sums for `send` and `receive` amounts per category are calculated correctly and match the raw data in the database.
+- The database is cleaned (`deleteMany`) before each relevant test to ensure **idempotent, repeatable results**.
+
+---
+
+**Benefits**
+
+- **Isolated logic is covered:** unit tests ensure no regression in pure business rules.
+- **Full flow is verified:** E2E tests validate the real behavior — from Clerk token auth to Prisma persistence.
+- **Security is tested:** token-based scoping works exactly as intended.
+- **Validation and error handling are tested:** no invalid data reaches the database layer.
+
+---
+
+## CI/CD Pipeline
+
+This project uses a **full Continuous Integration and Continuous Deployment pipeline**, implemented with **GitHub Actions**, **Docker**, **Prisma Migrate**, and **Google Cloud Run**.
+
+---
+
+### Pull Request Checks (CI)
+
+On every pull request to `main`:
+
+- **A PostgreSQL 17 container** spins up inside the runner (`localhost:5432`).
+- Prisma migrations are applied automatically (`prisma migrate deploy`) to ensure the schema is valid.
+- The application builds, starts locally, and is probed with `/api/health` to confirm it is healthy.
+- **Unit tests** run with a fully mocked Prisma client to verify core business logic, user scoping, and query correctness.
+- **End-to-End (E2E) tests** run against the live local API:
+  - A real test PostgreSQL database is used.
+  - A valid Clerk JWT is generated dynamically using the `CLERK_SECRET_KEY` and `TESTING_USER_ID` secrets.
+  - `supertest` hits the real endpoints, verifying authentication, input validation, DB persistence, filtering, and grouped summaries.
+
+If any check fails, the pull request cannot merge.
+
+---
+
+### Production Deployment (CD)
+
+When changes are merged to `main`:
+
+1. **Docker Build & Push**  
+   - The project builds a Docker image tagged with the commit SHA.
+   - The image is pushed to **Google Artifact Registry** inside the specified GCP project.
+
+2. **Run Migrations with Cloud Run Jobs**  
+   - A dedicated **Cloud Run Job** (`migrate-transactions`) runs `npx prisma migrate deploy` using the same image.
+   - This ensures the production database schema is fully up to date before new containers go live.
+
+3. **Deploy Cloud Run Service**  
+   - The new image is deployed to the `transactions-api` Cloud Run service in `us-central1`.
+   - The `DATABASE_URL` secret is securely passed to the container at runtime.
+   - Traffic is switched only when the migration job completes successfully.
+   - The result of the deployment job is sent to a specific Slack channel.
+---
+
+### Google Cloud Structure
+
+- **Artifact Registry** stores built Docker images securely.
+- **Cloud Run Jobs** run migrations as a dedicated one-off task, separate from the app.
+- **Cloud Run Service** serves the API container with auto-scaling and HTTPS.
+- The `/api/health` endpoint is used by the pipeline and health checks to confirm the API is ready.
+
+---
+
+### Possible Next Steps
+
+- Automate rollback if deploy or migration fails.
+- Tag Docker images with human-friendly tags (`latest` or `prod`).
+
 
 ## 1. Running the application locally
 
 1. Clone this repository and enter the project directory.
 2. Install dependencies:
+   
    ```bash
    npm install
    ```
-3. Create a `.env` file containing:
+   
+4. Create a `.env` file containing:
+   
    ```bash
    DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/your_db
-   CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
    CLERK_SECRET_KEY=your_clerk_secret_key
-   PORT=3000 # optional
+   TESTING_USER_ID=clerk_testing_user_id
    ```
-4. Generate Prisma client and apply migrations:
+   
+6. Generate Prisma client and apply migrations:
+   
    ```bash
    npx prisma generate
    npx prisma migrate dev --name init
    ```
-5. Start the API in development mode:
+
+7. Start the API in development mode:
+   
    ```bash
    npm run start:dev
    ```
+
    The API will be reachable at `http://localhost:3000/api`.
 
 ### Running tests
 
 - Unit tests: `npm run test:unit`
-- E2E tests: `npm run test:e2e` (requires test credentials; see `test/transactions.e2e-spec.ts`)
+- E2E tests: `npm run test:e2e`
+- All tests: `npm run test`
 
 ## 2. Postman collection
 
@@ -40,59 +234,5 @@ A `transactions.postman_collection.json` file is provided. To use it:
 1. Open Postman and choose **Import**.
 2. Select the `transactions.postman_collection.json` file.
 3. Create an environment with a `baseUrl` variable pointing to your local instance (`http://localhost:3000/api`) or to the deployed URL.
-4. Each request requires an `Authorization` header with a Clerk JWT. Tokens can be generated in Clerk's interface or via the E2E test script.
+4. Each request requires an `Authorization` header with a Clerk JWT.
 
-## 3. API design
-
-- **NestJS** supplies a modular and scalable structure. Each domain (transactions, authentication and so on) lives in its own module.
-- **Prisma** offers type-safe database access. The `PrismaService` centralizes the connection and can be reused by other services.
-- Authentication relies on a custom **Passport** strategy validating Clerk JWTs. A global guard (`ClerkAuthGuard`) protects all routes except those annotated with `@Public`.
-- Input validation uses `class-validator` and `class-transformer` in DTO classes.
-
-**Advantages**
-
-- Clearly structured, testable code.
-- Type-safe and automatic validations.
-- Clean integration with external providers such as Clerk.
-
-**Possible improvements**
-
-- Add pagination and advanced sorting to transaction queries.
-- Support additional authentication strategies or providers.
-
-## 4. Test design
-
-- **Unit tests** (`transactions.service.spec.ts`) isolate the transactions service by mocking Prisma. This verifies logic without requiring a real database.
-- **E2E tests** (`test/transactions.e2e-spec.ts`) start the full application against PostgreSQL and exercise the API as a client would. Valid JWTs are generated through the Clerk SDK.
-
-**Advantages**
-
-- Unit tests run quickly without external dependencies.
-- E2E tests ensure all components (NestJS, Prisma, authentication) work together.
-
-**Possible improvements**
-
-- Execute E2E tests in containers to fully isolate dependencies.
-- Use fixtures or factories to populate test data more conveniently.
-
-## 5. Deployment and branching strategy
-
-The project follows **GitHub Flow**:
-
-1. Features are developed on branches derived from `main`.
-2. Opening a Pull Request triggers the workflow [`ci.yml`](.github/workflows/ci.yml). It starts a PostgreSQL service in GitHub Actions, installs dependencies, compiles the project, runs migrations and executes the tests.
-3. When a PR is approved and merged to `main`, the workflow [`deploy-on-main.yml`](.github/workflows/deploy-on-main.yml) does the following:
-   - Authenticate with Google Cloud.
-   - Build and push a Docker image to Artifact Registry.
-   - Run migrations using a Cloud Run Job.
-   - Deploy the new image to the Cloud Run service.
-
-**Possible improvements**
-
-- Introduce a staging environment to validate changes before production.
-- Automate quality checks (lint and format) within the workflows.
-
-## Additional notes
-
-- The repository includes a multi-stage `Dockerfile` to produce a slim production image.
-- Code formatting is enforced with Prettier and linting with ESLint.
