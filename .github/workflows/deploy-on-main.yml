@@ -46,3 +46,49 @@ jobs:
           image: ${{ env.IMAGE }}
           region: us-central1
           secrets: DATABASE_URL=DATABASE_URL:latest
+
+            - name: Notify Slack of Deployment Status
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          STATUS="✅ *Deployment succeeded!*"
+          if [ "${{ job.status }}" != "success" ]; then
+            STATUS="❌ *Deployment failed!*"
+          fi
+
+          curl -X POST -H "Content-Type: application/json" -d '{
+            "text": "Deploy Status",
+            "blocks": [
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "'"$STATUS"'"
+                }
+              },
+              {
+                "type": "section",
+                "fields": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Branch:*\n'"${{ github.ref }}"'"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Commit:*\n<'"${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"'|'"${{ github.sha }}"'>"
+                  }
+                ]
+              },
+              {
+                "type": "context",
+                "elements": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "<'"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"'|View Deployment Logs>"
+                  }
+                ]
+              }
+            ]
+          }' $SLACK_WEBHOOK_URL
+
